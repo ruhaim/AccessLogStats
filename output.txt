@@ -1,1 +1,20 @@
-
+------------
+Most accessed Pages
+------------
+101376 : /product/JM00116469/nature-made-dha-90-capsules-japanese-imported-supplements-1/259383
+45056 : /
+------------
+Top 10 IPs by access
+------------
+101376 : 180.76.15.24
+45056 : 127.0.0.1
+------------
+Top 20 IPs by bandwidth
+------------
+18045106 : 180.76.15.24
+6307980 : 127.0.0.1
+------------
+Top 10 IPs by bandwidth
+------------
+101376 : Mozilla/5.0 (compatible; Baiduspider/2.0; +http://www.baidu.com/search/spider.html)
+45056 : Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/535.19 (KHTML, like Gecko) Chrome/18.0.1025.5 Safari/535.19
