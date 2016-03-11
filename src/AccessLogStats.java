@@ -88,7 +88,7 @@ public class AccessLogStats {
 	
 	private static void aggregateResults(PrintWriter out){
 		out.println("------------");
-		out.println("Top 100 Most accessed Pages");
+		out.println("Most accessed Pages");
 		out.println("------------");
 		printTopDetails(urlMap, Integer.MAX_VALUE, out);
 		
