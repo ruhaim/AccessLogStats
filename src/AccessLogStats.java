@@ -1,6 +1,13 @@
 
+import java.io.BufferedOutputStream;
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStreamWriter;
+import java.io.PrintWriter;
+import java.io.UnsupportedEncodingException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -17,42 +24,13 @@ import java.util.regex.*;
 
 public class AccessLogStats {
 
-
-//public static class LogEntryMapper extends Mapper<Object, Text, Text, IntWritable> {
-//		
-//		private final static IntWritable one = new IntWritable(1);
-//		private Text url = new Text();
-//		
-//		private Pattern p = Pattern.compile("(?:GET|POST)\\s([^\\s]+)");
-//		
-//		public void map(Object key, Text value, Context context) 
-//			throws IOException, InterruptedException {
-//			String[] entries = value.toString().split("\r?\n"); 
-//			for (int i=0, len=entries.length; i<len; i+=1) {
-//				Matcher matcher = p.matcher(entries[i]);
-//				if (matcher.find()) {
-//					url.set(matcher.group(1));
-//					context.write(url, one);
-//				}
-//			}
-//		}
-//	}
-//	
-//	public static class LogEntryReducer extends Reducer<Text, IntWritable, Text, IntWritable> {
-//		
-//		private IntWritable total = new IntWritable();
-//		
-//		public void reduce(Text key, Iterable<IntWritable> values, Context context)
-//			throws IOException, InterruptedException {
-//			int sum = 0;
-//		    for (IntWritable value : values) {
-//		    	sum += value.get();
-//		    }
-//		    total.set(sum);
-//		    context.write(key, total);
-//		}
-//	}
-	static String inputPath, outputPath;
+	private static String inputPath, outputPath;
+	final private static ConcurrentMap<String, AtomicInteger> urlMap = new ConcurrentHashMap<>();
+	final private static ConcurrentMap<String, AtomicInteger> ip2HitCountMap = new ConcurrentHashMap<>();
+	final private static ConcurrentMap<String, AtomicInteger> ip2BandwidthMap = new ConcurrentHashMap<>();
+	final private static ConcurrentMap<String, AtomicInteger> userAgent2UseCountMap = new ConcurrentHashMap<>();
+	private static Scanner in;
+	
 	/**
 	 * @param args
 	 */
@@ -61,8 +39,8 @@ public class AccessLogStats {
 
 		
 		if (args.length != 2) {
-			System.err.println("Usage: loganalyzer <in> <out>");
-			Scanner in = new Scanner(System.in);
+			System.err.println("Usage: logStats <in> <out>");
+			in = new Scanner(System.in);
 			System.out.print("Enter Input File Path : ");
 //			inputPath = in.nextLine();
 			inputPath = "samplelog.log";
@@ -75,33 +53,121 @@ public class AccessLogStats {
 		}
 		inputPath = args[0];
 		outputPath = args[1];
+
+		
+		mapData();
+		
+		writeResultsToFile();
+		
+
+	}
+	private static void writeResultsToFile()  throws IOException {
+		PrintWriter out = null;
+		try {
+			File outPutFile = new File(outputPath);
+			if(!outPutFile.exists()) {
+				outPutFile.createNewFile();
+			} 
+		  out = new PrintWriter(new OutputStreamWriter(
+		      new BufferedOutputStream(new FileOutputStream(outPutFile)), "UTF-8"));
+		  aggregateResults(out);
+		  
+		} catch (UnsupportedEncodingException e) {
+		  e.printStackTrace();
+		} catch (FileNotFoundException e) {
+		  e.printStackTrace();
+		} finally {
+		  if(out != null) {
+		    out.flush();
+		    out.close();
+		    System.out.println("File "+ outputPath + " has been created");
+		  }
+		}
+		
+	}
+	
+	private static void aggregateResults(PrintWriter out){
+		out.println("------------");
+		out.println("Top 100 Most accessed Pages");
+		out.println("------------");
+		printTopDetails(urlMap, Integer.MAX_VALUE, out);
+		
+		
+		out.println("------------");
+		out.println("Top 10 IPs by access");
+		out.println("------------");
+		printTopDetails(ip2HitCountMap, 10, out);
+
+		
+		out.println("------------");
+		out.println("Top 20 IPs by bandwidth");
+		out.println("------------");
+		printTopDetails(ip2BandwidthMap, 20, out);
+
+		
+		out.println("------------");
+		out.println("Top 10 IPs by bandwidth");
+		out.println("------------");
+		printTopDetails(userAgent2UseCountMap, 10, out);
+		
+	}
+	
+	private static void printTopDetails(ConcurrentMap<String, AtomicInteger> dataMap, int limitMax, PrintWriter out){
+		//Top 10 ip address by bandwidth
+		List<String> tempList = new ArrayList<>(dataMap.keySet());
+		Collections.sort(tempList, new Comparator<String>() {
+			public int compare(String a, String b) {
+				return dataMap.get(b).get() - dataMap.get(a).get();
+			}
+		});
+		
+		int limitCount = 0;
+		for(String val : tempList) {
+			if(++limitCount>limitMax){
+				break;
+			}
+			out.println(dataMap.get(val) + " : " + val);
+			
+		}
+	}
+	
+	private static void mapData() throws Exception{
+		
 		//Mapper
-		Pattern urlPattern = Pattern.compile("(?:GET|POST)\\s([^\\s]+)");
-		final ConcurrentMap<String, AtomicInteger> urlMap = new ConcurrentHashMap<>();
+
+		Pattern captureAllPattern = Pattern.compile("^(\\S+) \\S+ \\S+ \\[[^:]+:\\d+:\\d+:\\d+ [^\\]]+\\] \\\"\\S+ (.*?) \\S+\\\" \\S+ (\\S+) \"[^\"]*\" \"([^\"]*)\"");
+		//Gr 1 - IP Addr
+		//Gr 2 - Url
+		//Gr 3 - Bandwidth
+		//GR 4 - Useragent
+		
 		System.out.println(Paths.get(inputPath).toAbsolutePath());
 		try (BufferedReader br = Files.newBufferedReader(Paths.get(inputPath), StandardCharsets.UTF_8)) {
 		    for (String line = null; (line = br.readLine()) != null;) {
-		    	Matcher matcher = urlPattern.matcher(line);
+		    	Matcher matcher = captureAllPattern.matcher(line);
 				if (matcher.find()) {
-					urlMap.putIfAbsent(matcher.group(1), new AtomicInteger(0));
-				    urlMap.get(matcher.group(1)).incrementAndGet();
+					String ipAddr = matcher.group(1);
+					String url = matcher.group(2);
+					int bandwidth = Integer.parseInt(matcher.group(3));
+					String useragent = matcher.group(4);
+					
+					urlMap.putIfAbsent(url, new AtomicInteger(0));
+				    urlMap.get(url).incrementAndGet();
+				    
+				    ip2HitCountMap.putIfAbsent(ipAddr, new AtomicInteger(0));
+				    ip2HitCountMap.get(ipAddr).incrementAndGet();
+
+				    userAgent2UseCountMap.putIfAbsent(useragent, new AtomicInteger(0));
+				    userAgent2UseCountMap.get(useragent).incrementAndGet();
+
+				    ip2BandwidthMap.putIfAbsent(ipAddr, new AtomicInteger(bandwidth));
+				    ip2BandwidthMap.get(ipAddr).addAndGet(bandwidth);
+				    
+				    
 				} 
 		    }
 		}
 		
-		List<String> values = new ArrayList<>(urlMap.keySet());
-		Collections.sort(values, new Comparator<String>() {
-		  public int compare(String a, String b) {
-		    // no need to worry about nulls as we know a and b are both in pl
-		    return urlMap.get(a).get() - urlMap.get(b).get();
-		  }
-		});
-
-		for(String val : values) {
-		  System.out.println(val + "," + urlMap.get(val));
-		}
-		
-
 	}
 	
 }
